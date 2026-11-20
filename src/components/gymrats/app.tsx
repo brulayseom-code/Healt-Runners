@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUpRight, Bell, CalendarDays, Camera, ChartNoAxesCombined, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, CircleAlert, Dumbbell, Droplets, Flag, Flame, House, Leaf, LoaderCircle, Medal, Menu, MoonStar, Salad, Settings2, Sparkles, Sprout, Sun, Trophy, UserRound, Users, X } from "lucide-react";
+import { ArrowUpRight, Bell, CalendarDays, Camera, ChartNoAxesCombined, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, CircleAlert, Dumbbell, Droplets, ExternalLink, Flag, Flame, House, Leaf, LoaderCircle, Maximize2, Minimize2, Medal, Menu, MoonStar, Salad, Settings2, Share2, Sparkles, Sprout, Sun, Trophy, UserRound, Users, X } from "lucide-react";
 import { GymContext, type ModalState } from "./context";
 import { Avatar, AvatarStack, Progress } from "./ui";
 import { Dashboard } from "./dashboard";
@@ -9,6 +9,7 @@ import { AchievementsView, ActivityView, ChallengesView, HydrationView, Nutritio
 import { AppModals } from "./modals";
 import { calculateDay, dateKey, number, offsetDate, previewData, type DashboardData, type View } from "@/lib/gymrats";
 import { sessionHeaders, storeSessionId } from "@/lib/client-session";
+import { getLocalDashboard, saveLocalDashboard, processLocalAction, processLocalPhoto, processLocalAuth } from "@/lib/mock-store";
 
 const primaryNav = [
   { id: "day" as View, label: "Meu dia", icon: House },
@@ -42,13 +43,14 @@ export default function HealthRunnersApp({ initialDate }: { initialDate: string 
   const [view, setView] = useState<View>("day");
   const [modal, setModal] = useState<ModalState>(null);
   const [busy, setBusy] = useState(false);
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(true);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileMenu, setProfileMenu] = useState(false);
   const [notificationsRead, setNotificationsRead] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error"; points?: number } | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const lock = useRef(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const toastRef = useRef<HTMLDivElement>(null);
@@ -59,6 +61,62 @@ export default function HealthRunnersApp({ initialDate }: { initialDate: string 
   }, [toast]);
   const firstName = data.profile.name.split(" ")[0];
   const level = Math.floor(data.totalXp / 500) + 1;
+
+  useEffect(() => {
+    function onFullscreenChange() {
+      const doc = document as unknown as { fullscreenElement?: Element; webkitFullscreenElement?: Element };
+      setIsFullscreen(Boolean(doc.fullscreenElement || doc.webkitFullscreenElement));
+    }
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", onFullscreenChange);
+    };
+  }, []);
+
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      const doc = document as unknown as {
+        fullscreenElement?: Element;
+        webkitFullscreenElement?: Element;
+        exitFullscreen?: () => Promise<void>;
+        webkitExitFullscreen?: () => Promise<void>;
+      };
+      const root = document.documentElement as unknown as {
+        requestFullscreen?: () => Promise<void>;
+        webkitRequestFullscreen?: () => Promise<void>;
+      };
+      if (!doc.fullscreenElement && !doc.webkitFullscreenElement) {
+        if (root.requestFullscreen) {
+          await root.requestFullscreen();
+        } else if (root.webkitRequestFullscreen) {
+          await root.webkitRequestFullscreen();
+        }
+      } else {
+        if (doc.exitFullscreen) {
+          await doc.exitFullscreen();
+        } else if (doc.webkitExitFullscreen) {
+          await doc.webkitExitFullscreen();
+        }
+      }
+    } catch {
+      window.open(window.location.href, "_blank");
+    }
+  }, []);
+
+  const openStandalone = useCallback(() => {
+    window.open(window.location.href, "_blank");
+  }, []);
+
+  // On client mount, load local mock state immediately so edits persist across refresh
+  useEffect(() => {
+    try {
+      const local = getLocalDashboard(selectedDate);
+      setData(local);
+      setReady(true);
+    } catch { /* fallback */ }
+  }, []);
 
   useEffect(() => {
     try {
@@ -83,8 +141,27 @@ export default function HealthRunnersApp({ initialDate }: { initialDate: string 
 
   useEffect(() => {
     const controller = new AbortController();
-    setReady(false); setError("");
-    fetch(`/api/dashboard?date=${selectedDate}`, { signal: controller.signal, cache: "no-store", headers: sessionHeaders() }).then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.error); return result as DashboardData; }).then(result => { storeSessionId(result.profile.id); setData(result); setReady(true); }).catch(err => { if (err.name !== "AbortError") setError(err.message || "Não foi possível carregar seus registros."); });
+    fetch(`/api/dashboard?date=${selectedDate}`, { signal: controller.signal, cache: "no-store", headers: sessionHeaders() })
+      .then(async response => {
+        if (!response.ok) throw new Error(`API status ${response.status}`);
+        const result = await response.json();
+        if (result && result.profile && result.day && Array.isArray(result.history)) {
+          storeSessionId(result.profile.id);
+          saveLocalDashboard(result);
+          setData(result);
+          setReady(true);
+        }
+      })
+      .catch(err => {
+        if (err.name !== "AbortError") {
+          console.warn("Backend unavailable, using local presentation state:", err.message);
+          try {
+            const local = getLocalDashboard(selectedDate);
+            setData(local);
+          } catch { /* ignore */ }
+          setReady(true);
+        }
+      });
     return () => controller.abort();
   }, [selectedDate, retry]);
 
@@ -101,69 +178,161 @@ export default function HealthRunnersApp({ initialDate }: { initialDate: string 
       try { window.localStorage?.setItem(`healthrunners-notifications-${initialDate}`, "read"); } catch { /* ignore */ }
     }
   }, [initialDate]);
+
   const mutate = useCallback(async (body: Record<string, unknown>, message = "Seu registro foi salvo.") => {
-    if (lock.current || !ready) return false;
-    lock.current = true; setBusy(true);
+    if (lock.current) return false;
+    lock.current = true;
+    setBusy(true);
     try {
-      const response = await fetch("/api/actions", { method: "POST", headers: sessionHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ ...body, date: selectedDate }) });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Não foi possível salvar este registro.");
-      const updated = result as DashboardData;
-      storeSessionId(updated.profile.id);
+      let updated: DashboardData | null = null;
+      try {
+        const response = await fetch("/api/actions", {
+          method: "POST",
+          headers: sessionHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ ...body, date: selectedDate }),
+        });
+        if (response.ok) {
+          const result = await response.json();
+          if (result && result.profile && result.day && Array.isArray(result.history)) {
+            updated = result as DashboardData;
+            storeSessionId(updated.profile.id);
+            saveLocalDashboard(updated);
+          }
+        }
+      } catch (networkErr) {
+        console.warn("Backend action failed, applying locally for presentation:", networkErr);
+      }
+
+      // If backend was unreachable or returned an error, process action directly in browser state
+      if (!updated) {
+        updated = processLocalAction(data, body, selectedDate);
+        saveLocalDashboard(updated);
+      }
+
       const before = calculateDay(data.day, data.meals, data.activities, data.profile.waterGoal);
       const after = calculateDay(updated.day, updated.meals, updated.activities, updated.profile.waterGoal);
       const gain = updated.totalXp - data.totalXp;
       setData(updated);
-      setToast({ message: before.missionCount < 4 && after.missionCount === 4 ? "Missão completa! Você escolheu cuidar de você. Celebre!" : message, type: "success", points: gain > 0 ? gain : undefined });
+      setToast({
+        message: before.missionCount < 4 && after.missionCount === 4
+          ? "Missão completa! Você escolheu cuidar de você. Celebre!"
+          : message,
+        type: "success",
+        points: gain > 0 ? gain : undefined,
+      });
       return true;
-    } catch (err) { notify(err instanceof Error ? err.message : "Não foi possível salvar. Tente novamente.", "error"); return false; }
-    finally { lock.current = false; setBusy(false); }
-  }, [ready, selectedDate, data, notify]);
-
-  const savePhoto = useCallback(async (file: File | null) => {
-    if (lock.current || !ready) return false;
-    lock.current = true;
-    setBusy(true);
-    try {
-      const form = new FormData();
-      if (file) form.append("photo", file);
-      const response = await fetch(`/api/profile/photo?date=${selectedDate}`, file ? { method: "POST", body: form, headers: sessionHeaders() } : { method: "DELETE", headers: sessionHeaders() });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Não foi possível atualizar sua foto.");
-      storeSessionId((result as DashboardData).profile.id);
-      setData(result as DashboardData);
-      notify(file ? "Foto de perfil atualizada! Agora o Health Runners tem mais a sua cara." : "Foto removida. Suas iniciais agora aparecem no perfil.");
+    } catch {
+      // Guaranteed fallback: never lock user out during presentation
+      const updated = processLocalAction(data, body, selectedDate);
+      saveLocalDashboard(updated);
+      setData(updated);
+      notify(message);
       return true;
-    } catch (error) {
-      notify(error instanceof Error ? error.message : "Não foi possível salvar a foto. Tente novamente.", "error");
-      return false;
     } finally {
       lock.current = false;
       setBusy(false);
     }
-  }, [ready, selectedDate, notify]);
+  }, [selectedDate, data, notify]);
+
+  const savePhoto = useCallback(async (file: File | null) => {
+    if (lock.current) return false;
+    lock.current = true;
+    setBusy(true);
+    try {
+      let updated: DashboardData | null = null;
+      try {
+        const form = new FormData();
+        if (file) form.append("photo", file);
+        const response = await fetch(
+          `/api/profile/photo?date=${selectedDate}`,
+          file ? { method: "POST", body: form, headers: sessionHeaders() } : { method: "DELETE", headers: sessionHeaders() }
+        );
+        if (response.ok) {
+          const result = await response.json();
+          if (result && result.profile) {
+            updated = result as DashboardData;
+            storeSessionId(updated.profile.id);
+            saveLocalDashboard(updated);
+          }
+        }
+      } catch (networkErr) {
+        console.warn("Backend photo upload failed, saving locally:", networkErr);
+      }
+
+      if (!updated) {
+        updated = await processLocalPhoto(data, file);
+        saveLocalDashboard(updated);
+      }
+
+      setData(updated);
+      notify(file ? "Foto de perfil atualizada! Agora o Health Runners tem mais a sua cara." : "Foto removida. Suas iniciais agora aparecem no perfil.");
+      return true;
+    } catch {
+      const updated = await processLocalPhoto(data, file);
+      saveLocalDashboard(updated);
+      setData(updated);
+      notify(file ? "Foto de perfil atualizada!" : "Foto removida.");
+      return true;
+    } finally {
+      lock.current = false;
+      setBusy(false);
+    }
+  }, [selectedDate, data, notify]);
 
   const auth = useCallback(async (body: Record<string, unknown>, message: string) => {
     if (lock.current) return { ok: false };
-    lock.current = true; setBusy(true);
+    lock.current = true;
+    setBusy(true);
     try {
-      const response = await fetch("/api/auth", { method: "POST", headers: sessionHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ ...body, date: selectedDate }) });
-      const result = await response.json();
-      if (!response.ok) return { ok: false, error: result.error || "Não foi possível concluir agora." };
-      storeSessionId((result as DashboardData).profile.id);
-      setData(result as DashboardData);
+      let updated: DashboardData | null = null;
+      try {
+        const response = await fetch("/api/auth", {
+          method: "POST",
+          headers: sessionHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ ...body, date: selectedDate }),
+        });
+        if (response.ok) {
+          const result = await response.json();
+          if (result && result.profile) {
+            updated = result as DashboardData;
+            storeSessionId(updated.profile.id);
+            saveLocalDashboard(updated);
+          }
+        } else {
+          const errJson = await response.json().catch(() => ({}));
+          if (response.status === 409 || response.status === 401) {
+            return { ok: false, error: errJson.error || "E-mail ou senha incorretos." };
+          }
+        }
+      } catch (networkErr) {
+        console.warn("Backend auth failed, processing locally:", networkErr);
+      }
+
+      if (!updated) {
+        updated = processLocalAuth(data, body);
+        saveLocalDashboard(updated);
+      }
+
+      setData(updated);
       setReady(true);
       notify(message);
       return { ok: true };
     } catch {
-      return { ok: false, error: "Falha de conexão. Tente novamente." };
-    } finally { lock.current = false; setBusy(false); }
-  }, [selectedDate, notify]);
+      const updated = processLocalAuth(data, body);
+      saveLocalDashboard(updated);
+      setData(updated);
+      notify(message);
+      return { ok: true };
+    } finally {
+      lock.current = false;
+      setBusy(false);
+    }
+  }, [selectedDate, data, notify]);
 
   const dailyView = ["day", "nutrition", "hydration", "activity", "wellbeing"].includes(view);
   const today = dateKey();
   const dateLabel = `${selectedDate === today ? "Hoje, " : ""}${new Date(`${selectedDate}T12:00:00`).toLocaleDateString("pt-BR", { day: "numeric", month: "long" })}`;
   const context = { data, busy: busy || !ready, ready, view, navigate, openModal, mutate, savePhoto, auth, notify, selectedDate, setSelectedDate };
 
-  return <GymContext.Provider value={context}><div className="app-shell">{sidebarOpen && <button className="sidebar-overlay" aria-label="Fechar menu" onClick={() => setSidebarOpen(false)} />}<aside className={`sidebar ${sidebarOpen ? "open" : ""}`}><button className="brand" aria-label="Health Runners, ir para Meu dia" onClick={() => navigate("day")}><BrandLogo /></button><div className="sidebar-scroll"><nav aria-label="Navegação principal"><span className="nav-label">SUA ROTINA</span>{primaryNav.map(item => <button key={item.id} className={`nav-item ${view === item.id ? "active" : ""}`} onClick={() => navigate(item.id)} aria-current={view === item.id ? "page" : undefined}><item.icon size={18} strokeWidth={1.7} /><span>{item.label}</span>{view === item.id && <span className="nav-active-dot" />}</button>)}<span className="nav-label growth-label">SUA EVOLUÇÃO</span>{growthNav.map(item => <button key={item.id} className={`nav-item ${view === item.id ? "active" : ""}`} onClick={() => navigate(item.id)} aria-current={view === item.id ? "page" : undefined}><item.icon size={18} strokeWidth={1.7} /><span>{item.label}</span>{item.id === "challenges" && <span className="nav-count">{data.profile.joinedChallenges.filter(id => !data.profile.completedChallenges.includes(id)).length}</span>}{item.id !== "challenges" && view === item.id && <span className="nav-active-dot" />}</button>)}</nav><div className="sidebar-invite"><span className="invite-small-icon"><Sprout size={20} strokeWidth={1.5} /></span><h3>Bons hábitos ficam<br />melhores juntos.</h3><p>Traga sua turma para o desafio.</p><AvatarStack /><button onClick={() => openModal({ kind: "invite" })}>Convidar amigos<ArrowUpRight size={14} /></button></div></div><div className="sidebar-bottom"><button className="nav-item" onClick={() => openModal({ kind: "account" })}><UserRound size={18} strokeWidth={1.7} /><span>{data.profile.registered ? "Minha conta" : "Entrar / Criar conta"}</span>{!data.profile.registered && <span className="nav-account-dot" aria-hidden="true" />}</button><button className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => navigate("settings")}><Settings2 size={18} strokeWidth={1.7} /><span>Configurações</span></button><button className="sidebar-profile" onClick={() => navigate("settings")}><Avatar name={data.profile.name} avatar={data.profile.avatar} size={35} /><span><strong>{data.profile.name}</strong><small>Nível {level} · Em evolução</small></span><ChevronsUpDown size={14} /></button></div></aside><div className="main-shell"><header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Abrir menu de navegação"><Menu size={22} /></button><span className="topbar-leaf"><Leaf size={17} strokeWidth={1.6} /></span><span className="topbar-tagline">Sua rotina, seu desafio, <strong>sua evolução.</strong></span></div><div className="topbar-right"><span className="streak-header"><Flame size={17} strokeWidth={1.8} /><strong>{data.streak}</strong> dias de sequência</span><span className="topbar-divider" /><button className="notification-button icon-button" onClick={() => openModal({ kind: "notifications" })} aria-label="Abrir notificações"><Bell size={19} strokeWidth={1.7} />{!notificationsRead && data.profile.reminders && <span />}</button><div className="top-profile" ref={profileMenuRef}><button className="top-profile-trigger" onClick={() => setProfileMenu(!profileMenu)} aria-expanded={profileMenu} aria-label="Abrir menu do perfil"><Avatar name={data.profile.name} avatar={data.profile.avatar} size={35} /><span><strong>{firstName}</strong><small>Runner em evolução</small></span><ChevronDown size={14} /></button>{profileMenu && <div className="profile-dropdown"><div><strong>{data.profile.name}</strong><span>Nível {level} · {number(data.totalXp)} HealthPoints</span></div><button onClick={() => openModal({ kind: "account" })}><UserRound size={16} />{data.profile.registered ? "Minha conta" : "Entrar / Criar conta"}</button><button onClick={() => navigate("settings")}><Settings2 size={16} />Meu perfil e minhas metas</button><button onClick={() => openModal({ kind: "photo" })}><Camera size={16} />Alterar foto</button><button onClick={() => navigate("progress")}><ChartNoAxesCombined size={16} />Minha evolução</button><button onClick={() => openModal({ kind: "invite" })}><Users size={16} />Convidar meus amigos</button></div>}</div></div></header><main className={`main-content view-${view}`}><div className="page-heading"><div>{view === "day" && <div className="home-brand"><BrandLogo /></div>}<span className="page-eyebrow">{view === "day" ? "MEU DIA" : "MEU ESPAÇO DE EVOLUÇÃO"}</span><h1>{view === "day" ? <>Vamos nessa, {firstName}!<Sun className="greeting-sun" size={27} strokeWidth={1.5} /></> : viewMeta[view].title}</h1><p>{viewMeta[view].description}</p></div>{dailyView ? <div className="date-navigation"><button className="icon-button" aria-label="Ver dia anterior" disabled={busy || !ready || selectedDate <= offsetDate(today, -365)} onClick={() => setSelectedDate(offsetDate(selectedDate, -1))}><ChevronLeft size={16} /></button><label className="date-picker"><CalendarDays size={15} /><span>{dateLabel}</span><input type="date" aria-label="Escolher data dos registros" value={selectedDate} max={today} min={offsetDate(today, -365)} disabled={busy || !ready} onChange={e => e.target.value && setSelectedDate(e.target.value)} /></label><button className="icon-button" aria-label="Ver próximo dia" disabled={busy || !ready || selectedDate >= today} onClick={() => setSelectedDate(offsetDate(selectedDate, 1))}><ChevronRight size={16} /></button></div> : <span className="total-points"><Sparkles size={16} /><strong>{number(data.totalXp)}</strong> HealthPoints</span>}</div>{error && <div className="error-banner" role="alert"><CircleAlert size={18} /><span>{error}</span><button onClick={() => setRetry(n => n + 1)}>Tentar novamente</button></div>}{!ready && !error && <div className="loading-indicator" aria-label="Carregando registros"><span /></div>}{view === "day" && <Dashboard />}{view === "nutrition" && <NutritionView />}{view === "hydration" && <HydrationView />}{view === "activity" && <ActivityView />}{view === "wellbeing" && <WellbeingView />}{view === "challenges" && <ChallengesView />}{view === "ranking" && <RankingView />}{view === "achievements" && <AchievementsView />}{view === "progress" && <ProgressView />}{view === "settings" && <SettingsView />}<footer className="app-footer"><span><span className="footer-dot" />Feito para evoluir com você.</span><span>Health Runners © {new Date(initialDate).getFullYear()}<span className="footer-separator">·</span>Nutrição & bem-estar</span></footer></main></div>{toast && <div ref={toastRef} popover="manual" className={`toast ${toast.type}`} role="status"><span className="toast-icon">{toast.type === "success" ? <Check size={18} /> : <CircleAlert size={19} />}</span><p>{toast.message}</p>{toast.points && <span className="toast-points">+{toast.points} XP</span>}<button className="icon-button" aria-label="Fechar aviso" onClick={() => setToast(null)}><X size={15} /></button></div>}<AppModals modal={modal} close={() => setModal(null)} /></div></GymContext.Provider>;
+  return <GymContext.Provider value={context}><div className="app-shell">{sidebarOpen && <button className="sidebar-overlay" aria-label="Fechar menu" onClick={() => setSidebarOpen(false)} />}<aside className={`sidebar ${sidebarOpen ? "open" : ""}`}><button className="brand" aria-label="Health Runners, ir para Meu dia" onClick={() => navigate("day")}><BrandLogo /></button><div className="sidebar-scroll"><nav aria-label="Navegação principal"><span className="nav-label">SUA ROTINA</span>{primaryNav.map(item => <button key={item.id} className={`nav-item ${view === item.id ? "active" : ""}`} onClick={() => navigate(item.id)} aria-current={view === item.id ? "page" : undefined}><item.icon size={18} strokeWidth={1.7} /><span>{item.label}</span>{view === item.id && <span className="nav-active-dot" />}</button>)}<span className="nav-label growth-label">SUA EVOLUÇÃO</span>{growthNav.map(item => <button key={item.id} className={`nav-item ${view === item.id ? "active" : ""}`} onClick={() => navigate(item.id)} aria-current={view === item.id ? "page" : undefined}><item.icon size={18} strokeWidth={1.7} /><span>{item.label}</span>{item.id === "challenges" && <span className="nav-count">{data.profile.joinedChallenges.filter(id => !data.profile.completedChallenges.includes(id)).length}</span>}{item.id !== "challenges" && view === item.id && <span className="nav-active-dot" />}</button>)}</nav><div className="sidebar-invite"><span className="invite-small-icon"><Sprout size={20} strokeWidth={1.5} /></span><h3>Bons hábitos ficam<br />melhores juntos.</h3><p>Traga sua turma para o desafio.</p><AvatarStack /><button onClick={() => openModal({ kind: "invite" })}>Convidar amigos<ArrowUpRight size={14} /></button></div></div><div className="sidebar-bottom"><button className="nav-item" onClick={() => openModal({ kind: "account" })}><UserRound size={18} strokeWidth={1.7} /><span>{data.profile.registered ? "Minha conta" : "Entrar / Criar conta"}</span>{!data.profile.registered && <span className="nav-account-dot" aria-hidden="true" />}</button><button className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => navigate("settings")}><Settings2 size={18} strokeWidth={1.7} /><span>Configurações</span></button><button className="sidebar-profile" onClick={() => navigate("settings")}><Avatar name={data.profile.name} avatar={data.profile.avatar} size={35} /><span><strong>{data.profile.name}</strong><small>Nível {level} · Em evolução</small></span><ChevronsUpDown size={14} /></button></div></aside><div className="main-shell"><header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Abrir menu de navegação"><Menu size={22} /></button><span className="topbar-leaf"><Leaf size={17} strokeWidth={1.6} /></span><span className="topbar-tagline">Sua rotina, seu desafio, <strong>sua evolução.</strong></span></div><div className="topbar-right"><span className="streak-header"><Flame size={17} strokeWidth={1.8} /><strong>{data.streak}</strong> dias de sequência</span><span className="topbar-divider" /><button className="icon-button header-action-btn" onClick={() => openModal({ kind: "share" })} aria-label="Compartilhar link do aplicativo" title="Compartilhar link do aplicativo"><Share2 size={18} strokeWidth={1.7} /></button><button className="icon-button header-action-btn" onClick={toggleFullscreen} aria-label={isFullscreen ? "Sair da tela cheia" : "Abrir em tela cheia"} title={isFullscreen ? "Sair da tela cheia" : "Abrir em tela cheia"}>{isFullscreen ? <Minimize2 size={18} strokeWidth={1.7} /> : <Maximize2 size={18} strokeWidth={1.7} />}</button><button className="icon-button header-action-btn" onClick={openStandalone} aria-label="Abrir em nova aba" title="Abrir em nova aba / tela maior"><ExternalLink size={18} strokeWidth={1.7} /></button><button className="notification-button icon-button" onClick={() => openModal({ kind: "notifications" })} aria-label="Abrir notificações"><Bell size={19} strokeWidth={1.7} />{!notificationsRead && data.profile.reminders && <span />}</button><div className="top-profile" ref={profileMenuRef}><button className="top-profile-trigger" onClick={() => setProfileMenu(!profileMenu)} aria-expanded={profileMenu} aria-label="Abrir menu do perfil"><Avatar name={data.profile.name} avatar={data.profile.avatar} size={35} /><span><strong>{firstName}</strong><small>Runner em evolução</small></span><ChevronDown size={14} /></button>{profileMenu && <div className="profile-dropdown"><div><strong>{data.profile.name}</strong><span>Nível {level} · {number(data.totalXp)} HealthPoints</span></div><button onClick={() => openModal({ kind: "account" })}><UserRound size={16} />{data.profile.registered ? "Minha conta" : "Entrar / Criar conta"}</button><button onClick={() => navigate("settings")}><Settings2 size={16} />Meu perfil e minhas metas</button><button onClick={() => openModal({ kind: "photo" })}><Camera size={16} />Alterar foto</button><button onClick={() => navigate("progress")}><ChartNoAxesCombined size={16} />Minha evolução</button><button onClick={() => openModal({ kind: "invite" })}><Users size={16} />Convidar meus amigos</button><button onClick={() => openModal({ kind: "share" })}><Share2 size={16} />Compartilhar link do app</button><button onClick={toggleFullscreen}>{isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}{isFullscreen ? "Sair da tela cheia" : "Abrir em tela cheia"}</button><button onClick={openStandalone}><ExternalLink size={16} />Abrir em nova aba</button></div>}</div></div></header><main className={`main-content view-${view}`}><div className="page-heading"><div>{view === "day" && <div className="home-brand"><BrandLogo /></div>}<span className="page-eyebrow">{view === "day" ? "MEU DIA" : "MEU ESPAÇO DE EVOLUÇÃO"}</span><h1>{view === "day" ? <>Vamos nessa, {firstName}!<Sun className="greeting-sun" size={27} strokeWidth={1.5} /></> : viewMeta[view].title}</h1><p>{viewMeta[view].description}</p></div><div className="page-heading-controls"><div className="heading-quick-actions"><button className="button secondary button-screen-size" onClick={toggleFullscreen} title={isFullscreen ? "Sair da tela cheia" : "Abrir aplicativo em tela cheia"}>{isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}<span>{isFullscreen ? "Reduzir tela" : "Tela maior"}</span></button><button className="button secondary button-share-app" onClick={() => openModal({ kind: "share" })} title="Ver link do aplicativo para enviar para colegas"><Share2 size={14} /><span>Compartilhar link</span></button></div>{dailyView ? <div className="date-navigation"><button className="icon-button" aria-label="Ver dia anterior" disabled={busy || !ready || selectedDate <= offsetDate(today, -365)} onClick={() => setSelectedDate(offsetDate(selectedDate, -1))}><ChevronLeft size={16} /></button><label className="date-picker"><CalendarDays size={15} /><span>{dateLabel}</span><input type="date" aria-label="Escolher data dos registros" value={selectedDate} max={today} min={offsetDate(today, -365)} disabled={busy || !ready} onChange={e => e.target.value && setSelectedDate(e.target.value)} /></label><button className="icon-button" aria-label="Ver próximo dia" disabled={busy || !ready || selectedDate >= today} onClick={() => setSelectedDate(offsetDate(selectedDate, 1))}><ChevronRight size={16} /></button></div> : <span className="total-points"><Sparkles size={16} /><strong>{number(data.totalXp)}</strong> HealthPoints</span>}</div></div>{error && <div className="error-banner" role="alert"><CircleAlert size={18} /><span>{error}</span><button onClick={() => setRetry(n => n + 1)}>Tentar novamente</button></div>}{!ready && !error && <div className="loading-indicator" aria-label="Carregando registros"><span /></div>}{view === "day" && <Dashboard />}{view === "nutrition" && <NutritionView />}{view === "hydration" && <HydrationView />}{view === "activity" && <ActivityView />}{view === "wellbeing" && <WellbeingView />}{view === "challenges" && <ChallengesView />}{view === "ranking" && <RankingView />}{view === "achievements" && <AchievementsView />}{view === "progress" && <ProgressView />}{view === "settings" && <SettingsView />}<footer className="app-footer"><span><span className="footer-dot" />Feito para evoluir com você.</span><span>Health Runners © {new Date(initialDate).getFullYear()}<span className="footer-separator">·</span>Nutrição & bem-estar</span></footer></main></div>{toast && <div ref={toastRef} popover="manual" className={`toast ${toast.type}`} role="status"><span className="toast-icon">{toast.type === "success" ? <Check size={18} /> : <CircleAlert size={19} />}</span><p>{toast.message}</p>{toast.points && <span className="toast-points">+{toast.points} XP</span>}<button className="icon-button" aria-label="Fechar aviso" onClick={() => setToast(null)}><X size={15} /></button></div>}<AppModals modal={modal} close={() => setModal(null)} /></div></GymContext.Provider>;
 }

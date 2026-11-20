@@ -1,7 +1,7 @@
 "use client";
 import { createContext, useContext } from "react";
 import type { DashboardData, View } from "@/lib/gymrats";
-export type ModalState = { kind: "checkin" | "meal" | "water" | "activity" | "sleep" | "challenge" | "create-challenge" | "invite" | "group" | "notifications" | "achievement" | "confirm" | "photo" | "account"; id?: string; value?: string; action?: Record<string, unknown>; title?: string; description?: string; confirmLabel?: string; cancelLabel?: string; tone?: "danger" | "neutral"; successMessage?: string } | null;
+export type ModalState = { kind: "checkin" | "meal" | "water" | "activity" | "sleep" | "challenge" | "create-challenge" | "invite" | "group" | "notifications" | "achievement" | "confirm" | "photo" | "account" | "share"; id?: string; value?: string; action?: Record<string, unknown>; title?: string; description?: string; confirmLabel?: string; cancelLabel?: string; tone?: "danger" | "neutral"; successMessage?: string } | null;
 export type GymContextType = {
   data: DashboardData;
   busy: boolean;

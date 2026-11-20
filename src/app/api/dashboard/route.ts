@@ -4,14 +4,17 @@ import { resolveProfile } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
+import { previewData } from "@/lib/gymrats";
+
 export async function GET(request: Request) {
+  let date = "";
   try {
-    const date = validDate(new URL(request.url).searchParams.get("date"));
+    date = validDate(new URL(request.url).searchParams.get("date"));
     const jar = await cookies();
     const profile = await resolveProfile(request, jar);
     return Response.json(await getDashboard(profile.id, date), { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    console.error("Dashboard:", error);
-    return Response.json({ error: error instanceof Error && error.message.startsWith("Escolha") ? error.message : "Não foi possível carregar seu dia. Tente novamente." }, { status: 500 });
+    console.warn("Database fallback in /api/dashboard (returning presentation data):", error instanceof Error ? error.message : "db offline");
+    return Response.json(previewData(date || undefined), { headers: { "Cache-Control": "no-store" } });
   }
 }

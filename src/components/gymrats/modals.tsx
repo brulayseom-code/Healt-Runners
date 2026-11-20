@@ -1,6 +1,6 @@
 "use client";
 import { useRef, useState, type FormEvent } from "react";
-import { ArrowRight, ArrowUpRight, Award, Bell, Check, CheckCheck, ChevronRight, Clock3, Copy, Droplets, Dumbbell, Flame, Heart, Info, Leaf, Link, LoaderCircle, LogOut, Minus, Moon, Plus, Send, ShieldCheck, Sparkles, Star, Target, Trash2, Trophy, Users } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Award, Bell, Check, CheckCheck, ChevronRight, Clock3, Copy, Droplets, Dumbbell, ExternalLink, Flame, Heart, Info, Leaf, Link, LoaderCircle, LogOut, Maximize2, Minus, Moon, Plus, Send, Share2, ShieldCheck, Sparkles, Star, Target, Trash2, Trophy, Users } from "lucide-react";
 import { useGym, type ModalState } from "./context";
 import { AvatarStack, CheckBox, HabitIcon, Modal, Progress, WaterGlass, XP } from "./ui";
 import { allChallenges, calculateDay, CHALLENGES, CHALLENGE_METRICS, challengeProgress, challengeView, COMPONENTS, FOOD_COLORS, metricReward, metricWindow, number, type ChallengeMetricId } from "@/lib/gymrats";
@@ -173,6 +173,89 @@ function AccountForm({ close }: { close: () => void }) {
   </form>;
 }
 
+function ShareModal({ close }: { close: () => void }) {
+  const { notify } = useGym();
+  const [copied, setCopied] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const currentUrl = typeof window !== "undefined" ? window.location.href : "";
+
+  async function copy() {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(currentUrl);
+        setCopied(true);
+        notify("Link copiado para a área de transferência!");
+        return;
+      }
+      throw new Error("clipboard unavailable");
+    } catch {
+      try {
+        inputRef.current?.select();
+        document.execCommand("copy");
+        setCopied(true);
+        notify("Link copiado para a área de transferência!");
+      } catch {
+        inputRef.current?.select();
+        notify("Selecione e copie o endereço exibido abaixo.", "error");
+      }
+    }
+  }
+
+  function openNewTab() {
+    window.open(currentUrl, "_blank");
+  }
+
+  return (
+    <div className="share-modal-container">
+      <div className="share-link-box">
+        <input
+          ref={inputRef}
+          readOnly
+          value={currentUrl}
+          onFocus={(e) => e.target.select()}
+          aria-label="Link atual do aplicativo"
+        />
+        <button className="button primary" type="button" onClick={copy}>
+          {copied ? <Check size={16} /> : <Copy size={16} />}
+          {copied ? "Copiado!" : "Copiar"}
+        </button>
+      </div>
+
+      <div className="share-actions-grid">
+        <button className="button secondary full-width" type="button" onClick={openNewTab}>
+          <ExternalLink size={16} />
+          Abrir em tela cheia / nova aba
+        </button>
+      </div>
+
+      <div className="soft-notice stacked">
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <Info size={17} />
+          <strong>Por que o link direto dá &quot;Preview Unavailable&quot; no celular de outra pessoa?</strong>
+        </div>
+        <p>
+          O endereço que termina com <code>.arena.site</code> pertence aos servidores internos de teste da plataforma <strong>Arena.ai</strong>. Por regras de segurança da própria plataforma, ele é protegido e <strong>só abre dentro da sua tela no arena.ai</strong>. Quando outra pessoa tenta abrir pelo WhatsApp, o Arena bloqueia com a mensagem: <em>&quot;This preview is only available on arena.ai&quot;</em>.
+        </p>
+        <p>
+          <strong>Como fazer suas colegas acessarem de verdade do próprio celular:</strong>
+        </p>
+        <div className="share-step-item">
+          <strong>Opção 1 — Link próprio no ar em 2 minutos (Vercel — 100% Grátis):</strong>
+          <span>
+            Deixamos o app preparado para rodar direto sem precisar configurar banco de dados! Clique no botão de download (<code>⬇</code>) na barra superior do Arena para baixar o projeto em ZIP. Suba no GitHub e conecte na <a href="https://vercel.com" target="_blank" rel="noopener noreferrer" style={{ textDecoration: "underline", fontWeight: 600 }}>Vercel.com</a>. Em 2 minutos você terá um link fixo como <code>healthrunners.vercel.app</code> que abre em qualquer celular pelo WhatsApp, sem nenhum bloqueio!
+          </span>
+        </div>
+        <div className="share-step-item">
+          <strong>Opção 2 — Mostrar para elas agora mesmo (sem configurar nada):</strong>
+          <span>
+            Abra o app no celular pelo botão <strong>&quot;Tela maior&quot;</strong>, use o gravador de tela do celular para gravar 1 minuto navegando pelos hábitos, água, refeições coloridas e ranking, e envie o vídeo no grupo. É a forma mais garantida e segura para apresentar o projeto hoje!
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ConfirmContent({ modal, close }: { modal: ActiveModal; close: () => void }) {
   const { mutate, auth, busy } = useGym();
   const neutral = modal.tone === "neutral";
@@ -183,7 +266,7 @@ function ConfirmContent({ modal, close }: { modal: ActiveModal; close: () => voi
     if (isAuth) { const r = await auth({ action: modal.action.authAction }, modal.successMessage ?? "Pronto!"); if (r.ok) close(); }
     else if (await mutate(modal.action, modal.successMessage ?? defaultMessage)) close();
   }
-  return <div className="confirm-content"><span className={`icon-tile ${neutral ? "green" : "pink"}`}>{neutral ? <LogOut size={24} /> : <Trash2 size={25} />}</span><p>{modal.description}</p><div className="confirm-actions"><button className="button secondary" onClick={close}>{modal.cancelLabel ?? "Manter meus registros"}</button><button className={neutral ? "button primary" : "button danger"} disabled={busy} onClick={confirm}>{busy ? "Aguarde..." : (modal.confirmLabel ?? "Sim, excluir")}</button></div></div>;
+  return <div className="confirm-content"><span className={`icon-tile ${neutral ? "green" : "pink"}`}>{neutral ? (modal.action?.action === "restore-demo" ? <Sparkles size={24} /> : <LogOut size={24} />) : <Trash2 size={25} />}</span><p>{modal.description}</p><div className="confirm-actions"><button className="button secondary" onClick={close}>{modal.cancelLabel ?? "Manter meus registros"}</button><button className={neutral ? "button primary" : "button danger"} disabled={busy} onClick={confirm}>{busy ? "Aguarde..." : (modal.confirmLabel ?? "Sim, excluir")}</button></div></div>;
 }
 
 export function AppModals({ modal, close }: { modal: ModalState; close: () => void }) {
@@ -198,6 +281,7 @@ export function AppModals({ modal, close }: { modal: ModalState; close: () => vo
     challenge: ["Seu desafio", "Pequenos compromissos. Grandes possibilidades."],
     "create-challenge": ["Crie o seu desafio", "Defina uma meta que faça sentido para a sua rotina."],
     account: ["Sua conta", "Acesse seus dados em qualquer aparelho."],
+    share: ["Compartilhar o aplicativo", "Veja o link e as melhores formas de mostrar o Health Runners."],
     invite: ["Juntos, vamos mais longe", "Mais companhia, mais incentivo, mais bem-estar."],
     group: ["Encontre a sua turma", "Compartilhe a jornada, não a cobrança."],
     notifications: ["Um incentivo para o seu dia", "Lembretes leves para continuar cuidando de você."],
@@ -205,5 +289,5 @@ export function AppModals({ modal, close }: { modal: ModalState; close: () => vo
     confirm: [modal.title || "Excluir este registro?", "Esta ação não pode ser desfeita."],
   };
   const [title, subtitle] = titles[modal.kind];
-  return <Modal key={`${modal.kind}-${modal.id || ""}`} title={title} subtitle={subtitle} onClose={close} className={modal.kind === "meal" ? "meal-modal" : ""}>{modal.kind === "photo" && <ProfilePhotoEditor close={close} />}{modal.kind === "water" && <WaterForm close={close} />}{modal.kind === "meal" && <MealForm close={close} initialType={modal.value} />}{modal.kind === "activity" && <ActivityForm close={close} initialType={modal.value} />}{modal.kind === "sleep" && <SleepForm close={close} />}{modal.kind === "checkin" && <CheckinForm close={close} initialMood={modal.value} />}{modal.kind === "challenge" && <ChallengeDetail id={modal.id} close={close} />}{modal.kind === "create-challenge" && <CreateChallengeForm close={close} />}{modal.kind === "account" && <AccountForm close={close} />}{modal.kind === "invite" && <InviteContent />}{modal.kind === "group" && <GroupForm close={close} code={modal.value} />}{modal.kind === "notifications" && <Notifications close={close} />}{modal.kind === "achievement" && <AchievementDetail id={modal.id} />}{modal.kind === "confirm" && <ConfirmContent modal={modal} close={close} />}</Modal>;
+  return <Modal key={`${modal.kind}-${modal.id || ""}`} title={title} subtitle={subtitle} onClose={close} className={modal.kind === "meal" ? "meal-modal" : ""}>{modal.kind === "photo" && <ProfilePhotoEditor close={close} />}{modal.kind === "water" && <WaterForm close={close} />}{modal.kind === "meal" && <MealForm close={close} initialType={modal.value} />}{modal.kind === "activity" && <ActivityForm close={close} initialType={modal.value} />}{modal.kind === "sleep" && <SleepForm close={close} />}{modal.kind === "checkin" && <CheckinForm close={close} initialMood={modal.value} />}{modal.kind === "challenge" && <ChallengeDetail id={modal.id} close={close} />}{modal.kind === "create-challenge" && <CreateChallengeForm close={close} />}{modal.kind === "account" && <AccountForm close={close} />}{modal.kind === "share" && <ShareModal close={close} />}{modal.kind === "invite" && <InviteContent />}{modal.kind === "group" && <GroupForm close={close} code={modal.value} />}{modal.kind === "notifications" && <Notifications close={close} />}{modal.kind === "achievement" && <AchievementDetail id={modal.id} />}{modal.kind === "confirm" && <ConfirmContent modal={modal} close={close} />}</Modal>;
 }

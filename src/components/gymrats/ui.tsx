@@ -8,7 +8,7 @@ export const HABIT_ICONS: Record<string, LucideIcon> = { breakfast: Coffee, frui
 export function HabitIcon({ name, size = 19, className = "" }: { name: string; size?: number; className?: string }) { const Icon = HABIT_ICONS[name] ?? Sparkles; return <Icon size={size} strokeWidth={1.8} className={className} />; }
 export function Avatar({ name, avatar = "initials", size = 36, className = "" }: { name: string; avatar?: string; size?: number; className?: string }) {
   const initials = name.trim().split(/\s+/).map(n => n[0]).slice(0, 2).join("");
-  const source = AVATARS[avatar] || (avatar.startsWith(PROFILE_PHOTO_PATH) || avatar.startsWith("blob:") ? avatar : undefined);
+  const source = AVATARS[avatar] || (avatar.startsWith(PROFILE_PHOTO_PATH) || avatar.startsWith("blob:") || avatar.startsWith("data:") ? avatar : undefined);
   return <span className={`avatar ${className}`} style={{ width: size, height: size, fontSize: size * .32 }}><span>{initials}</span>{source && <img key={source} src={source} width={size} height={size} alt={name} onError={e => { e.currentTarget.style.display = "none"; }} />}</span>;
 }
 export function AvatarStack() { return <div className="avatar-stack"><Avatar name="Ana Beatriz" avatar="ana" size={25} /><Avatar name="Lucas Martins" avatar="lucas" size={25} /><Avatar name="Mariana Silva" avatar="maria" size={25} /><span className="avatar-more">+12</span></div>; }

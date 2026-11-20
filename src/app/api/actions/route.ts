@@ -5,8 +5,9 @@ import { and, eq, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { ensureDay, awardCompletedChallenges, validDate } from "@/lib/dashboard";
 import { resolveProfile } from "@/lib/session";
-import { CHALLENGES, CHALLENGE_METRICS, HABITS, COMPONENTS, FOOD_COLORS, metricWindow, metricReward } from "@/lib/gymrats";
+import { CHALLENGES, CHALLENGE_METRICS, HABITS, COMPONENTS, FOOD_COLORS, metricWindow, metricReward, previewData, dateKey } from "@/lib/gymrats";
 import { storedGroupCode, LEGACY_GROUP_CODE } from "@/lib/brand";
+import { processLocalAction } from "@/lib/mock-store";
 
 export const dynamic = "force-dynamic";
 function text(value: unknown, max: number, required = false) {
@@ -18,11 +19,13 @@ function list(value: unknown, allowed: string[]) { if (!Array.isArray(value) || 
 
 export async function POST(request: Request) {
   if (request.headers.get("sec-fetch-site") === "cross-site") return Response.json({ error: "Requisição não autorizada." }, { status: 403 });
+  let date = dateKey();
+  let body: Record<string, unknown> = {};
   try {
-    const body = await request.json();
+    body = (await request.json()) as Record<string, unknown>;
     const jar = await cookies();
     const profile = await resolveProfile(request, jar);
-    const date = validDate(body.date);
+    date = validDate(body.date);
     const day = await ensureDay(profile.id, date);
     const dayWhere = and(eq(dailyLogs.profileId, profile.id), eq(dailyLogs.date, date));
     switch (body.action) {
@@ -171,12 +174,20 @@ export async function POST(request: Request) {
         });
         break;
       }
+      case "restore-demo": {
+        return Response.json(processLocalAction(previewData(date), { action: "restore-demo" }, date), { headers: { "Cache-Control": "no-store" } });
+      }
       default: throw new Error("Essa ação não está disponível.");
     }
     return Response.json(await awardCompletedChallenges(profile.id, date), { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("Health Runners action:", error);
-    const known = error instanceof Error && !/query|database|relation|connect|syntax|SQL|ECONN/i.test(error.message);
+    const isDbError = error instanceof Error && /query|database|relation|connect|syntax|SQL|ECONN|timeout/i.test(error.message);
+    if (isDbError) {
+      console.warn("Database fallback in /api/actions (presentation mode active)");
+      return Response.json(processLocalAction(previewData(date), body, date), { headers: { "Cache-Control": "no-store" } });
+    }
+    const known = error instanceof Error;
     return Response.json({ error: known ? error.message : "Não foi possível salvar. Tente novamente em instantes." }, { status: 400 });
   }
 }

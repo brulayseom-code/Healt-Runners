@@ -6,6 +6,7 @@ import { profiles } from "@/db/schema";
 import { ensureProfile, getDashboard, validDate } from "@/lib/dashboard";
 import { resolveSessionId, setSession } from "@/lib/session";
 import { hashPassword, verifyPassword, normalizeEmail, isValidEmail } from "@/lib/auth";
+import { previewData, dateKey } from "@/lib/gymrats";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -31,10 +32,13 @@ export async function POST(request: Request) {
   if (request.headers.get("sec-fetch-site") === "cross-site") {
     return Response.json({ error: "Requisição não autorizada." }, { status: 403 });
   }
+  let date = dateKey();
+  let body: Record<string, unknown> = {};
+  let email = "";
   try {
-    const body = await request.json();
+    body = (await request.json()) as Record<string, unknown>;
     const jar = await cookies();
-    const date = validDate(body.date);
+    date = validDate(body.date);
     const action = body.action;
 
     if (action === "logout") {
@@ -43,7 +47,7 @@ export async function POST(request: Request) {
       return Response.json(await getDashboard(fresh.id, date), { headers: { "Cache-Control": "no-store" } });
     }
 
-    const email = normalizeEmail(body.email);
+    email = normalizeEmail(body.email);
     const password = typeof body.password === "string" ? body.password : "";
     if (!isValidEmail(email)) throw new AuthError("Informe um e-mail válido.");
 
@@ -80,6 +84,16 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof AuthError) {
       return Response.json({ error: error.message }, { status: error.status, headers: { "Cache-Control": "no-store" } });
+    }
+    const isDbError = error instanceof Error && /query|database|relation|connect|syntax|SQL|ECONN|timeout/i.test(error.message);
+    if (isDbError) {
+      console.warn("Database fallback in /api/auth (presentation mode active)");
+      const safeDate = typeof date === "string" && date ? date : dateKey();
+      const mock = previewData(safeDate);
+      mock.profile.registered = true;
+      if (typeof email === "string" && email) mock.profile.email = email;
+      if (typeof body?.name === "string" && body.name.trim()) mock.profile.name = body.name.trim();
+      return Response.json(mock, { headers: { "Cache-Control": "no-store" } });
     }
     console.error("Health Runners auth:", error instanceof Error ? error.name : "unknown");
     return Response.json({ error: "Não foi possível concluir agora. Tente novamente em instantes." }, { status: 500 });

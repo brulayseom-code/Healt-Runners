@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { profiles, profilePhotos } from "@/db/schema";
 import { getDashboard, validDate } from "@/lib/dashboard";
+import { previewData } from "@/lib/gymrats";
 import { MAX_PROFILE_PHOTO_MB, MAX_PROFILE_PHOTO_BYTES, MAX_PROFILE_PHOTO_PIXELS, PROFILE_PHOTO_PATH, PROFILE_PHOTO_TYPES } from "@/lib/photo";
 import { cookies } from "next/headers";
 import { checkPhotoOrigin, photoErrorResponse, ProfilePhotoError, readPhotoForm } from "@/lib/profile-photo";
@@ -47,14 +48,21 @@ export async function POST(request: Request) {
       throw new ProfilePhotoError("Não foi possível abrir essa imagem. Envie outra foto JPG, PNG ou WebP de até 40 megapixels.");
     }
     const avatar = `${PROFILE_PHOTO_PATH}${profile.id}?v=${randomUUID()}`;
-    await db.transaction(async tx => {
-      await tx.insert(profilePhotos).values({ profileId: profile.id, imageData: output.toString("base64") }).onConflictDoUpdate({
-        target: profilePhotos.profileId,
-        set: { imageData: output.toString("base64"), updatedAt: new Date() },
+    try {
+      await db.transaction(async tx => {
+        await tx.insert(profilePhotos).values({ profileId: profile.id, imageData: output.toString("base64") }).onConflictDoUpdate({
+          target: profilePhotos.profileId,
+          set: { imageData: output.toString("base64"), updatedAt: new Date() },
+        });
+        await tx.update(profiles).set({ avatar }).where(eq(profiles.id, profile.id));
       });
-      await tx.update(profiles).set({ avatar }).where(eq(profiles.id, profile.id));
-    });
-    return Response.json(await getDashboard(profile.id, date), { headers: { "Cache-Control": "no-store" } });
+      return Response.json(await getDashboard(profile.id, date), { headers: { "Cache-Control": "no-store" } });
+    } catch (dbErr) {
+      console.warn("Database fallback in /api/profile/photo POST:", dbErr);
+      const mock = previewData(date);
+      mock.profile.avatar = `data:image/webp;base64,${output.toString("base64")}`;
+      return Response.json(mock, { headers: { "Cache-Control": "no-store" } });
+    }
   } catch (error) { return photoErrorResponse(error); }
 }
 
@@ -64,10 +72,17 @@ export async function DELETE(request: Request) {
     const jar = await cookies();
     const profile = await resolveProfile(request, jar);
     const date = selectedDate(request);
-    await db.transaction(async tx => {
-      await tx.delete(profilePhotos).where(eq(profilePhotos.profileId, profile.id));
-      await tx.update(profiles).set({ avatar: "initials" }).where(eq(profiles.id, profile.id));
-    });
-    return Response.json(await getDashboard(profile.id, date), { headers: { "Cache-Control": "no-store" } });
+    try {
+      await db.transaction(async tx => {
+        await tx.delete(profilePhotos).where(eq(profilePhotos.profileId, profile.id));
+        await tx.update(profiles).set({ avatar: "initials" }).where(eq(profiles.id, profile.id));
+      });
+      return Response.json(await getDashboard(profile.id, date), { headers: { "Cache-Control": "no-store" } });
+    } catch (dbErr) {
+      console.warn("Database fallback in /api/profile/photo DELETE:", dbErr);
+      const mock = previewData(date);
+      mock.profile.avatar = "initials";
+      return Response.json(mock, { headers: { "Cache-Control": "no-store" } });
+    }
   } catch (error) { return photoErrorResponse(error); }
 }

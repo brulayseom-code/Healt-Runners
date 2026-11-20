@@ -104,10 +104,70 @@ export function challengeProgress(id: string, data: DashboardData) {
   return challengeMetricProgress(challenge.metric, challenge.target, challenge.windowDays, data);
 }
 export function challengeBonus(data: DashboardData) { return allChallenges(data).filter(c => data.profile.joinedChallenges.includes(c.id) && challengeProgress(c.id, data) >= c.target).reduce((sum, c) => sum + c.reward, 0); }
-export function previewData(today: string): DashboardData {
+export function previewData(today: string = dateKey()): DashboardData {
+  const goal = 2000;
+  const seedDays: HistoryDay[] = Array.from({ length: 14 }, (_, index) => {
+    const ago = 13 - index;
+    const date = offsetDate(today, -ago);
+    const isToday = ago === 0;
+    const hasActivity = [0, 1, 3, 4, 5, 8, 10, 12].includes(ago);
+    const habits = isToday ? [] : ago === 7 ? [] : ["breakfast", "fruit", ...(hasActivity ? ["workout"] : [])];
+    const waterMl = isToday ? 1500 : ago === 7 ? 750 : ago < 7 ? 2000 + (ago % 3) * 250 : 1000 + (ago % 4) * 250;
+    const sleepHours = isToday ? 7.5 : ago === 7 ? 6 : [7.2, 7.5, 6.5, 8, 7, 7.3][ago % 6];
+    const checkIn = !isToday && ago !== 7;
+    const colors = isToday ? ["orange", "white", "red"] : habits.length ? ["green", "orange", "red"] : [];
+    const completed = new Set(habits);
+    if (waterMl >= goal) completed.add("water");
+    if (sleepHours >= 7) completed.add("sleep");
+    if (hasActivity) completed.add("workout");
+    if (colors.length) { completed.add("fruit"); completed.add("vegetables"); }
+    const activityMinutes = hasActivity ? (isToday ? 45 : [30, 40, 45, 35][ago % 4]) : 0;
+    const mealsCount = isToday ? 2 : habits.length ? 3 : 0;
+    const missionCount = MISSIONS.filter(id => completed.has(id)).length;
+    const points = HABITS.filter(h => completed.has(h.id)).reduce((sum, h) => sum + h.points, 0) + Math.min(mealsCount, 4) * 3 + (checkIn ? 3 : 0) + (missionCount === 4 ? 50 : 0);
+    const progress = Math.round(HABITS.filter(h => completed.has(h.id)).length / HABITS.length * 100);
+    return {
+      date,
+      waterMl,
+      sleepHours,
+      activityMinutes,
+      mealsCount,
+      points,
+      progress,
+      completed: [...completed],
+      checkIn,
+      colors,
+    };
+  });
+
   const day: Day = { date: today, habits: [], waterMl: 1500, sleepHours: 7.5, sleepQuality: 4, mood: null, energy: 60, stress: null, checkIn: false, note: "" };
-  return { profile: { id: "preview", name: "Isabella Costa", email: "", avatar: "isabella", waterGoal: 2000, joinedChallenges: ["water-week", "colorful-plate"], completedChallenges: [], reminders: true, groupCode: DEFAULT_GROUP_CODE, registered: false }, day,
-    meals: [{ id: -1, type: "Café da manhã", components: ["protein", "fruit", "carbohydrate"], colors: ["orange", "white"], note: "Iogurte natural, banana e granola", createdAt: `${today}T08:00:00` }, { id: -2, type: "Lanche", components: ["fruit", "fat"], colors: ["red"], note: "Maçã e castanhas", createdAt: `${today}T10:30:00` }],
-    activities: [{ id: -1, type: "Musculação", duration: 45, note: "Um tempo para cuidar de mim", createdAt: `${today}T07:00:00` }], history: [], customChallenges: [], totalXp: 1650, weeklyXp: 350, streak: 6, hydrationStreak: 6,
-    leaderboard: [{ id: "ana", name: "Ana Beatriz", avatar: "ana", points: 420 }, { id: "lucas", name: "Lucas Martins", avatar: "lucas", points: 395 }, { id: "maria", name: "Mariana Silva", avatar: "maria", points: 380 }, { id: "you", name: "Isabella Costa", avatar: "isabella", points: 350, isYou: true }], group: { code: DEFAULT_GROUP_CODE, name: APP_NAME, category: "friends" } };
+  const meals: Meal[] = [
+    { id: -1, type: "Café da manhã", components: ["protein", "fruit", "carbohydrate"], colors: ["orange", "white"], note: "Iogurte natural, banana e granola", createdAt: `${today}T08:00:00` },
+    { id: -2, type: "Lanche", components: ["fruit", "fat"], colors: ["red"], note: "Maçã e castanhas", createdAt: `${today}T10:30:00` }
+  ];
+  const activities: Activity[] = [
+    { id: -1, type: "Musculação", duration: 45, note: "Um tempo para cuidar de mim", createdAt: `${today}T07:00:00` }
+  ];
+  const weeklyXp = seedDays.filter(d => d.date >= offsetDate(today, -6)).reduce((sum, d) => sum + d.points, 0);
+  const totalXp = 1000 + seedDays.reduce((sum, d) => sum + d.points, 0);
+  return {
+    profile: { id: "preview", name: "Isabella Costa", email: "", avatar: "isabella", waterGoal: goal, joinedChallenges: ["water-week", "colorful-plate"], completedChallenges: [], reminders: true, groupCode: DEFAULT_GROUP_CODE, registered: false },
+    day,
+    meals,
+    activities,
+    history: seedDays,
+    customChallenges: [],
+    totalXp,
+    weeklyXp,
+    streak: 6,
+    hydrationStreak: 6,
+    leaderboard: [
+      { id: "ana", name: "Ana Beatriz", avatar: "ana", points: 420 },
+      { id: "lucas", name: "Lucas Martins", avatar: "lucas", points: 395 },
+      { id: "maria", name: "Mariana Silva", avatar: "maria", points: 380 },
+      { id: "you", name: "Isabella Costa", avatar: "isabella", points: weeklyXp, isYou: true },
+      { id: "pedro", name: "Pedro Santos", avatar: "pedro", points: 245 },
+    ],
+    group: { code: DEFAULT_GROUP_CODE, name: APP_NAME, category: "friends" }
+  };
 }

@@ -24,11 +24,12 @@ Para que todo o grupo acesse o aplicativo pelo celular e notebook com um link fi
 ### Passo 3: Publicar na Vercel (1 minuto)
 1. Acesse **[vercel.com](https://vercel.com)** e entre com a sua conta do GitHub.
 2. Clique em **"Add New Project"** e selecione o repositório `health-runners`.
-3. Na seção **Environment Variables**, adicione:
+3. Na seção **Environment Variables**, adicione (opcional se quiser sincronizar com PostgreSQL):
    - **Name:** `DATABASE_URL`
    - **Value:** (cole a URL que você copiou no Passo 1)
+   *(Nota: mesmo se não configurar o banco agora, o app funciona perfeitamente com os dados de demonstração salvos no navegador!)*
 4. Clique em **Deploy**.
-5. Em menos de 2 minutos, a Vercel gera um link público gratuito (ex: `https://health-runners.vercel.app`) que **fica no ar pelo tempo que vocês precisarem** (1 mês, 1 ano, etc.), sem custo.
+5. Em menos de 2 minutos, a Vercel gera um link público gratuito (ex: `https://health-runners.vercel.app`) que **fica no ar pelo tempo que vocês precisarem** (1 mês, 1 ano, etc.), sem custo e sem nenhum bloqueio para abrir no celular de qualquer pessoa.
 
 ---
 
